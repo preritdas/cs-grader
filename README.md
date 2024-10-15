@@ -1,6 +1,6 @@
 # CS 101 Assignment Grader
 
-The CS 101 Assignment Grader is a comprehensive tool designed to automate the grading process for Java programming assignments. It utilizes the o1-preview model from OpenAI to analyze student code, provide detailed feedback, and assign scores based on customizable criteria. This system is designed specifically for CS 101 (Intro to Computer Science), taught in Java (so we must of course grade it using Python). :)
+Automates the grading process for Java programming assignments. Utilizes the o1-preview model from OpenAI to conduct multi-step analysis of student code, with syntax checks, compilation tests, and a runtime simulation to detect logical errors + edge cases. Provides detailed feedback, and assigns scores based on criteria from assignment requirements. This system is designed specifically for CS 101 (Intro to Computer Science), taught in Java (so we must of course grade it using Python). :)
 
 https://github.com/user-attachments/assets/363d3fba-7961-46ec-8ab3-e31a4a5e7aaf
 
@@ -9,7 +9,6 @@ https://github.com/user-attachments/assets/363d3fba-7961-46ec-8ab3-e31a4a5e7aaf
 1. **Automated Grading**: Analyzes Java code using the o1-preview model and provides a detailed assessment.
 2. **Customizable Criteria**: Allows instructors to set specific grading requirements.
 3. **Detailed Feedback**: Offers insights on syntax, logic, runtime behavior, and code quality.
-4. **Interactive UI**: Built with Streamlit for an easy-to-use web interface.
 5. **Flexible Scoring**: Supports variable maximum points and extra credit.
 
 ## How It Works
