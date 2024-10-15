@@ -1,0 +1,30 @@
+{
+	"name": "CS 101 Assignment Grader",
+	"build": {
+		"context": "..",
+		"dockerfile": "../Dockerfile"
+	},
+
+	"forwardPorts": [8080],
+
+	"postCreateCommand": "pip install --no-cache-dir -U jupyterlab ipywidgets",
+	
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-toolsai.jupyter"
+			]
+		}
+	},
+	
+	"features": {
+		"ghcr.io/devcontainers/features/sshd:1": {
+			"version": "latest"
+		}
+	},
+
+	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "devcontainer"
+}
