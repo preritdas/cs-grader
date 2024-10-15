@@ -1,13 +1,6 @@
 """Main app for CS 101 Assignment Grader."""
 import streamlit as st
 
-# Secrets
-import os
-import dotenv; dotenv.load_dotenv()
-
-for secret, value in st.secrets:
-    os.environ[secret] = value
-
 # Load the grader
 import plotly.graph_objects as go
 from grader import grade_assignment
