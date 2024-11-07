@@ -50,25 +50,31 @@ The grading process generates a CSV file with the following columns:
 For more information on specific commands, use:
 python cli.py [command] --help
 """
-import zipfile
+# Standard library imports
+import os
+import sys
+import re
+import json
 import csv
+import threading
+import zipfile
 from pathlib import Path
-import logging
-from tqdm import tqdm
-import typer
+from datetime import datetime
+from queue import Queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Type hints
 from typing import Optional, List, Dict, Any, NamedTuple, Tuple
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-from queue import Queue
-import sys
-import shutil
-import re
-from datetime import datetime
-from openai import OpenAI
-from dotenv import load_dotenv
-import os
-from typing import Dict, List, Tuple
+
+# Third-party imports
+import typer
+from tqdm import tqdm  # Progress bar
+from openai import OpenAI  # OpenAI API client
+from dotenv import load_dotenv  # Environment variable management
+
+# Logging setup
+import logging
 
 
 # Load environment variables
