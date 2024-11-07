@@ -744,6 +744,7 @@ def rename(
     rename_operations: Dict[Path, Path] = {}
     
     # Process all files in directory
+    error_filenames: list[str] = []
     for file_path in submissions_path.glob('*'):
         if not file_path.is_file() or file_path.name == 'index.html':
             continue
@@ -763,6 +764,7 @@ def rename(
             rename_operations[file_path] = new_path
         else:
             logger.error(f"Error extracting student name from {file_path.name}")
+            error_filenames.append(file_path.name)
     
     if not rename_operations:
         typer.echo("No files to rename.")
@@ -772,6 +774,12 @@ def rename(
     typer.echo("\nPlanned rename operations:")
     for old_path, new_path in rename_operations.items():
         typer.echo(f"{old_path.name} -> {new_path.name}")
+
+    # Show any filenames that couldn't be processed
+    if error_filenames:
+        typer.echo("\nFilenames that could not be processed:")
+        for filename in error_filenames:
+            typer.echo(filename)
     
     # If dry run, exit here
     if dry_run:
