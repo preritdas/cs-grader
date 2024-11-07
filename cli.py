@@ -9,8 +9,18 @@ import typer
 from typing import Optional, List, Dict, Any, NamedTuple
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from queue import Queue
+import sys
+import time  # For simulating work in progress bar
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(threadName)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(help="Grade CS assignments with detailed feedback.")
@@ -53,51 +63,65 @@ class FormattedResult:
     overall_assessment: str
     areas_for_improvement: str
 
+class ThreadSafeWriter:
+    """Thread-safe file writer using a lock."""
+    
+    def __init__(self):
+        self._lock = threading.Lock()
+    
+    def write_safely(self, file_path: Path, mode: str, write_func):
+        """Execute a write function with thread safety."""
+        with self._lock:
+            with open(file_path, mode) as f:
+                return write_func(f)
+
 class SubmissionProcessor:
     """Handles discovering and processing submission files."""
+    
+    def __init__(self):
+        self._file_lock = threading.Lock()
     
     @staticmethod
     def extract_student_name(filename: str) -> str:
         """Extract student's name from filename."""
         return Path(filename).stem.replace('_', ' ')
     
-    @staticmethod
-    def process_java_file(file_path: Path) -> List[SubmissionFile]:
-        """Process a single Java file."""
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return [SubmissionFile(filename=file_path.name, content=content)]
+    def process_java_file(self, file_path: Path) -> List[SubmissionFile]:
+        """Process a single Java file with thread safety."""
+        with self._file_lock:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return [SubmissionFile(filename=file_path.name, content=content)]
     
-    @staticmethod
-    def process_zip_file(file_path: Path) -> List[SubmissionFile]:
-        """Process a zip file containing Java files."""
+    def process_zip_file(self, file_path: Path) -> List[SubmissionFile]:
+        """Process a zip file containing Java files with thread safety."""
         files = []
-        with zipfile.ZipFile(file_path, 'r') as zip_ref:
-            for file_info in zip_ref.infolist():
-                if file_info.filename.endswith('.java'):
-                    with zip_ref.open(file_info) as f:
-                        content = f.read().decode('utf-8')
-                        files.append(SubmissionFile(
-                            filename=file_info.filename,
-                            content=content
-                        ))
+        with self._file_lock:
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith('.java'):
+                        with zip_ref.open(file_info) as f:
+                            content = f.read().decode('utf-8')
+                            files.append(SubmissionFile(
+                                filename=file_info.filename,
+                                content=content
+                            ))
         return files
     
-    @classmethod
-    def find_submissions(cls, directory: Path) -> List[Submission]:
+    def find_submissions(self, directory: Path) -> List[Submission]:
         """Find all valid submissions in directory."""
         submissions = []
         for file_path in directory.glob('*'):
             if not (file_path.suffix in ['.java', '.zip']):
                 continue
                 
-            student_name = cls.extract_student_name(file_path.name)
+            student_name = self.extract_student_name(file_path.name)
             
             try:
                 if file_path.suffix == '.zip':
-                    files = cls.process_zip_file(file_path)
+                    files = self.process_zip_file(file_path)
                 else:
-                    files = cls.process_java_file(file_path)
+                    files = self.process_java_file(file_path)
                 
                 submissions.append(Submission(
                     student_name=student_name,
@@ -159,9 +183,11 @@ class ResultFormatter:
 class ResultWriter:
     """Handles writing formatted results to CSV."""
     
-    @staticmethod
-    def write_results(results: List[FormattedResult], output_path: Path) -> None:
-        """Write formatted results to CSV file."""
+    def __init__(self):
+        self._writer = ThreadSafeWriter()
+    
+    def write_results(self, results: List[FormattedResult], output_path: Path) -> None:
+        """Write formatted results to CSV file with thread safety."""
         if not results:
             logger.warning("No results to write to CSV")
             return
@@ -191,11 +217,12 @@ class ResultWriter:
             for r in results
         ]
         
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        def write_csv(f):
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
         
+        self._writer.write_safely(output_path, 'w', write_csv)
         logger.info(f"Results written to {output_path}")
 
 class Grader:
@@ -295,46 +322,64 @@ def grade(
     
     # Find all submissions
     typer.echo("Finding submissions...")
-    submissions = SubmissionProcessor.find_submissions(submissions_path)
+    submission_processor = SubmissionProcessor()
+    submissions = submission_processor.find_submissions(submissions_path)
     
     if not submissions:
         typer.echo("No valid submissions found.")
         raise typer.Exit(1)
     
-    # Create grader
+    # Create grader and result writer
     grader = Grader(guidelines, max_points)
+    writer = ResultWriter()
+    
+    # Create result queue for thread safety
+    result_queue = Queue()
+    
+    # Create progress bar
+    progress_bar = tqdm(total=len(submissions), desc="Grading")
+    progress_lock = threading.Lock()
+    
+    def process_submission(submission: Submission):
+        """Process a single submission with progress tracking."""
+        try:
+            result = grader.grade_submission(submission)
+            formatted_result = ResultFormatter.format_result(result)
+            result_queue.put(formatted_result)
+        except Exception as e:
+            logger.error(f"Error processing {submission.student_name}: {str(e)}")
+        finally:
+            with progress_lock:
+                progress_bar.update(1)
     
     # Grade submissions using thread pool
     typer.echo(f"Grading submissions using {threads} threads...")
-    results = []
     
     with ThreadPoolExecutor(max_workers=threads) as executor:
         # Submit all grading tasks
-        future_to_submission = {
-            executor.submit(grader.grade_submission, submission): submission
+        futures = [
+            executor.submit(process_submission, submission)
             for submission in submissions
-        }
+        ]
         
-        # Process results as they complete
-        for future in tqdm(
-            as_completed(future_to_submission),
-            total=len(submissions),
-            desc="Grading"
-        ):
-            submission = future_to_submission[future]
-            try:
-                result = future.result()
-                formatted_result = ResultFormatter.format_result(result)
-                results.append(formatted_result)
-            except Exception as e:
-                logger.error(f"Error processing {submission.student_name}: {str(e)}")
+        # Wait for all tasks to complete
+        for future in futures:
+            future.result()  # This ensures we catch any exceptions
+    
+    # Close progress bar
+    progress_bar.close()
+    
+    # Collect all results from queue
+    results = []
+    while not result_queue.empty():
+        results.append(result_queue.get())
     
     # Sort results by student name for consistency
     results.sort(key=lambda x: x.student_name)
     
     # Write results
     typer.echo("Writing results...")
-    ResultWriter.write_results(results, output_path)
+    writer.write_results(results, output_path)
     typer.echo(f"Grading completed! Results saved to: {output_path}")
 
 if __name__ == "__main__":
