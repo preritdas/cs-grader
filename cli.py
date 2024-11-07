@@ -5,12 +5,13 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 import typer
-from typing import Optional, List, Dict, Any, NamedTuple
+from typing import Optional, List, Dict, Any, NamedTuple, Tuple
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from queue import Queue
 import sys
+import shutil
 
 logging.basicConfig(
     level=logging.INFO,
@@ -271,6 +272,73 @@ class Grader:
                 overall_assessment="Failed to grade submission",
                 improvement_suggestions=["Please resubmit or contact instructor"]
             )
+
+@app.command()
+def collect(
+    brightspace_dirs: List[str] = typer.Argument(..., help="List of Brightspace download directories"),
+    output_dir: str = typer.Argument(..., help="Directory to collect all submissions"),
+):
+    """
+    Collect submissions from Brightspace download directories into a single directory.
+    
+    This command will:
+    1. Scan all input directories recursively
+    2. Find all files (preserving original names)
+    3. Copy them to the output directory
+    
+    Example:
+    python cli.py collect 1 2 students
+    """
+    # Convert paths to Path objects
+    brightspace_paths = [Path(d) for d in brightspace_dirs]
+    output_path = Path(output_dir)
+    
+    # Validate input directories
+    for path in brightspace_paths:
+        if not path.is_dir():
+            typer.echo(f"Error: {path} is not a valid directory")
+            raise typer.Exit(1)
+    
+    # Create output directory if it doesn't exist
+    output_path.mkdir(exist_ok=True)
+    
+    # Track files for progress bar
+    all_files = []
+    for dir_path in brightspace_paths:
+        # Walk through directory
+        for path in dir_path.rglob('*'):
+            if path.is_file() and path.name != 'index.html':  # Skip index.html
+                all_files.append(path)
+    
+    if not all_files:
+        typer.echo("No files found in input directories.")
+        raise typer.Exit(1)
+    
+    # Copy files with progress bar
+    with tqdm(total=len(all_files), desc="Collecting submissions") as progress:
+        for file_path in all_files:
+            try:
+                # Generate unique name if file already exists
+                dest_path = output_path / file_path.name
+                if dest_path.exists():
+                    # Add numeric suffix if file exists
+                    base = dest_path.stem
+                    suffix = dest_path.suffix
+                    counter = 1
+                    while dest_path.exists():
+                        dest_path = output_path / f"{base}_{counter}{suffix}"
+                        counter += 1
+                
+                # Copy file
+                shutil.copy2(file_path, dest_path)
+                progress.update(1)
+            except Exception as e:
+                logger.error(f"Error copying {file_path}: {str(e)}")
+                progress.update(1)
+    
+    # Count collected files
+    collected = len(list(output_path.glob('*')))
+    typer.echo(f"\nCollection complete! {collected} files copied to {output_path}")
 
 @app.command()
 def grade(
