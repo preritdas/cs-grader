@@ -65,7 +65,14 @@ import sys
 import shutil
 import re
 from datetime import datetime
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+from typing import Dict, List, Tuple
 
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging with thread information
 logging.basicConfig(
@@ -81,6 +88,9 @@ app = typer.Typer(
     help="CS Assignment Grading CLI - Process and grade programming assignments with detailed feedback.",
     no_args_is_help=True
 )
+
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 @dataclass
@@ -630,6 +640,152 @@ def collect_btsp(
     # Count collected files
     collected = len(list(output_path.glob('*')))
     typer.echo(f"\nCollection complete! {collected} files copied to {output_path}")
+
+
+def analyze_filename(filename: str) -> Tuple[str, str]:
+    """
+    Use GPT-4o-mini to analyze a filename and extract the student's name.
+    
+    Args:
+        filename (str): Original filename
+        
+    Returns:
+        Tuple[str, str]: (first_name, last_name)
+    """
+    prompt = f"""
+    Extract the student's first and last name from this filename: {filename}
+    
+    Common patterns to consider:
+    - Names may be separated by underscores or spaces
+    - May include assignment numbers (e.g., asg5, hw5)
+    - May include additional descriptors (e.g., "part2", "PartB")
+    - May be in various formats (e.g., "LastFirst" or "FirstLast")
+    
+    Return only a JSON object in this format:
+    {{"first_name": "string", "last_name": "string"}}
+    """
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        response_format={"type": "json_object"}
+    )
+    
+    if response.choices and response.choices[0].message:
+        try:
+            result = json.loads(response.choices[0].message.content)
+            return result["first_name"], result["last_name"]
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Error parsing name from filename {filename}: {e}")
+            return None, None
+    return None, None
+
+@app.command()
+def rename(
+    submissions_dir: str = typer.Argument(
+        ...,
+        help="Directory containing student submissions to rename",
+        show_default=False
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show planned renames without executing them",
+        show_default=True
+    )
+):
+    """
+    Rename student submission files to match the expected naming convention.
+    
+    This command processes a directory of student submissions and renames files
+    to follow the First_Last.ext format (e.g., John_Smith.zip). It first shows
+    all planned renames and asks for confirmation before executing them.
+    
+    Example:
+        # Rename all submissions in the 'submissions' directory
+        python cli.py rename submissions
+        
+        # Show planned renames without executing them
+        python cli.py rename submissions --dry-run
+    
+    The command will:
+    1. Scan the directory for submission files
+    2. Use AI to extract student names from filenames
+    3. Generate standardized filenames (First_Last.ext)
+    4. Show all planned renames
+    5. Execute renames after confirmation
+    """
+    # Convert path to Path object
+    submissions_path = Path(submissions_dir)
+    
+    # Validate input directory
+    if not submissions_path.is_dir():
+        typer.echo(f"Error: {submissions_dir} is not a valid directory")
+        raise typer.Exit(1)
+    
+    # Dictionary to store rename operations: old_path -> new_path
+    rename_operations: Dict[Path, Path] = {}
+    
+    # Process all files in directory
+    for file_path in submissions_path.glob('*'):
+        if not file_path.is_file() or file_path.name == 'index.html':
+            continue
+            
+        if not (file_path.suffix in ['.java', '.zip']):
+            continue
+        
+        # Extract student name using GPT-4o-mini
+        first_name, last_name = analyze_filename(file_path.name)
+        
+        if first_name and last_name:
+            # Generate new filename
+            new_name = f"{first_name}_{last_name}{file_path.suffix}"
+            new_path = file_path.parent / new_name
+            
+            # Store rename operation
+            rename_operations[file_path] = new_path
+    
+    if not rename_operations:
+        typer.echo("No files to rename.")
+        raise typer.Exit(0)
+    
+    # Show planned renames
+    typer.echo("\nPlanned rename operations:")
+    for old_path, new_path in rename_operations.items():
+        typer.echo(f"{old_path.name} -> {new_path.name}")
+    
+    # If dry run, exit here
+    if dry_run:
+        typer.echo("\nDry run complete. No files were renamed.")
+        raise typer.Exit(0)
+    
+    # Ask for confirmation
+    if not typer.confirm("\nProceed with renaming?"):
+        typer.echo("Operation cancelled.")
+        raise typer.Exit(0)
+    
+    # Execute renames
+    with tqdm(total=len(rename_operations), desc="Renaming files") as progress:
+        for old_path, new_path in rename_operations.items():
+            try:
+                # Ensure we don't overwrite existing files
+                if new_path.exists():
+                    counter = 1
+                    while new_path.exists():
+                        new_name = f"{new_path.stem}_{counter}{new_path.suffix}"
+                        new_path = new_path.parent / new_name
+                        counter += 1
+                
+                # Rename file
+                old_path.rename(new_path)
+                progress.update(1)
+            except Exception as e:
+                logger.error(f"Error renaming {old_path} to {new_path}: {e}")
+                progress.update(1)
+    
+    typer.echo("\nRename operations completed!")
 
 
 @app.command()
