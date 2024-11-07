@@ -1,5 +1,4 @@
 """CLI for grading CS assignments."""
-import os
 import zipfile
 import csv
 from pathlib import Path
@@ -12,7 +11,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from queue import Queue
 import sys
-import time  # For simulating work in progress bar
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,10 +54,10 @@ class FormattedResult:
     """Represents a grading result formatted for output."""
     student_name: str
     final_score: str
+    extra_credit: str  # Moved up in the order
     code_quality: str
     requirements_analysis: str
     point_deductions: str
-    extra_credit: str
     overall_assessment: str
     areas_for_improvement: str
 
@@ -172,10 +170,10 @@ class ResultFormatter:
         return FormattedResult(
             student_name=result.student_name,
             final_score=f"{result.final_score}/{result.max_points}",
+            extra_credit=extra_credit_text,  # Moved up in the order
             code_quality=result.code_quality,
             requirements_analysis=cls.format_requirements(result.requirements_assessment),
             point_deductions=deductions_text,
-            extra_credit=extra_credit_text,
             overall_assessment=result.overall_assessment,
             areas_for_improvement="\n- " + "\n- ".join(result.improvement_suggestions)
         )
@@ -195,10 +193,10 @@ class ResultWriter:
         fieldnames = [
             'Student Name',
             'Final Score',
+            'Extra Credit',  # Moved up in the order
             'Code Quality Assessment',
             'Requirements Analysis',
             'Point Deductions',
-            'Extra Credit',
             'Overall Assessment',
             'Areas for Improvement'
         ]
@@ -207,10 +205,10 @@ class ResultWriter:
             {
                 'Student Name': r.student_name,
                 'Final Score': r.final_score,
+                'Extra Credit': r.extra_credit,  # Moved up in the order
                 'Code Quality Assessment': r.code_quality,
                 'Requirements Analysis': r.requirements_analysis,
                 'Point Deductions': r.point_deductions,
-                'Extra Credit': r.extra_credit,
                 'Overall Assessment': r.overall_assessment,
                 'Areas for Improvement': r.areas_for_improvement
             }
