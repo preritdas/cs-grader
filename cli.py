@@ -8,6 +8,7 @@ from tqdm import tqdm
 import typer
 from typing import Optional, List, Dict, Any, NamedTuple
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -251,6 +252,7 @@ def grade(
     submissions_dir: str = typer.Argument(..., help="Directory containing student submissions (.java or .zip files)"),
     guidelines_path: str = typer.Argument(..., help="Path to the assignment requirements file"),
     max_points: Optional[int] = typer.Option(100, help="Maximum points possible for the assignment"),
+    threads: Optional[int] = typer.Option(1, help="Number of threads to use for parallel grading"),
     output: Optional[str] = typer.Option(
         None,
         help="Output CSV file path. If not provided, will save as grading_results.csv in the submissions directory"
@@ -279,6 +281,10 @@ def grade(
     if max_points <= 0:
         typer.echo("Error: max_points must be positive")
         raise typer.Exit(1)
+        
+    if threads <= 0:
+        typer.echo("Error: threads must be positive")
+        raise typer.Exit(1)
     
     # Set default output path if not provided
     output_path = Path(output) if output else submissions_path.parent / 'grading_results.csv'
@@ -298,13 +304,33 @@ def grade(
     # Create grader
     grader = Grader(guidelines, max_points)
     
-    # Grade submissions
-    typer.echo("Grading submissions...")
+    # Grade submissions using thread pool
+    typer.echo(f"Grading submissions using {threads} threads...")
     results = []
-    for submission in tqdm(submissions, desc="Grading"):
-        result = grader.grade_submission(submission)
-        formatted_result = ResultFormatter.format_result(result)
-        results.append(formatted_result)
+    
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        # Submit all grading tasks
+        future_to_submission = {
+            executor.submit(grader.grade_submission, submission): submission
+            for submission in submissions
+        }
+        
+        # Process results as they complete
+        for future in tqdm(
+            as_completed(future_to_submission),
+            total=len(submissions),
+            desc="Grading"
+        ):
+            submission = future_to_submission[future]
+            try:
+                result = future.result()
+                formatted_result = ResultFormatter.format_result(result)
+                results.append(formatted_result)
+            except Exception as e:
+                logger.error(f"Error processing {submission.student_name}: {str(e)}")
+    
+    # Sort results by student name for consistency
+    results.sort(key=lambda x: x.student_name)
     
     # Write results
     typer.echo("Writing results...")
