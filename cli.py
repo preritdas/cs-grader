@@ -147,7 +147,8 @@ class FormattedResult:
     in a human-readable format.
     
     Attributes:
-        student_name (str): Name of the student
+        last_name (str): Student's last name
+        first_name (str): Student's first name
         final_score (str): Score as "points/total"
         extra_credit (str): Extra credit with explanation
         code_quality (str): Code quality assessment
@@ -156,7 +157,8 @@ class FormattedResult:
         overall_assessment (str): Overall evaluation
         areas_for_improvement (str): Improvement suggestions
     """
-    student_name: str
+    last_name: str
+    first_name: str
     final_score: str
     extra_credit: str
     code_quality: str
@@ -298,6 +300,22 @@ class ResultFormatter:
     """
     
     @staticmethod
+    def split_name(full_name: str) -> Tuple[str, str]:
+        """
+        Split full name into first and last name.
+        
+        Args:
+            full_name (str): Full name of student
+            
+        Returns:
+            Tuple[str, str]: (last_name, first_name)
+        """
+        parts = full_name.strip().split()
+        if len(parts) == 1:
+            return parts[0], ""  # Last name only
+        return parts[-1], " ".join(parts[:-1])  # Last name, First name(s)
+    
+    @staticmethod
     def format_requirements(requirements: List[Dict[str, Any]]) -> str:
         """
         Format requirements assessment into a readable string.
@@ -333,6 +351,9 @@ class ResultFormatter:
         Returns:
             FormattedResult: Formatted result ready for output
         """
+        # Split student name into first and last
+        last_name, first_name = cls.split_name(result.student_name)
+        
         # Format point deductions
         deductions_text = "\n".join(
             f"- {d['reason']} (-{d['points']} points)" 
@@ -347,7 +368,8 @@ class ResultFormatter:
         )
         
         return FormattedResult(
-            student_name=result.student_name,
+            last_name=last_name,
+            first_name=first_name,
             final_score=f"{result.final_score}/{result.max_points}",
             extra_credit=extra_credit_text,
             code_quality=result.code_quality,
@@ -382,7 +404,8 @@ class ResultWriter:
             return
             
         fieldnames = [
-            'Student Name',
+            'Last Name',
+            'First Name',
             'Final Score',
             'Extra Credit',
             'Code Quality Assessment',
@@ -394,7 +417,8 @@ class ResultWriter:
         
         rows = [
             {
-                'Student Name': r.student_name,
+                'Last Name': r.last_name,
+                'First Name': r.first_name,
                 'Final Score': r.final_score,
                 'Extra Credit': r.extra_credit,
                 'Code Quality Assessment': r.code_quality,
@@ -405,6 +429,9 @@ class ResultWriter:
             }
             for r in results
         ]
+        
+        # Sort rows by last name, then first name
+        rows.sort(key=lambda x: (x['Last Name'], x['First Name']))
         
         def write_csv(f):
             writer = csv.DictWriter(f, fieldnames=fieldnames)
