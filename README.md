@@ -9,7 +9,9 @@ https://github.com/user-attachments/assets/363d3fba-7961-46ec-8ab3-e31a4a5e7aaf
 1. **Automated Grading**: Analyzes Java code using the o1-preview model and provides a detailed assessment.
 2. **Customizable Criteria**: Allows instructors to set specific grading requirements.
 3. **Detailed Feedback**: Offers insights on syntax, logic, runtime behavior, and code quality.
-5. **Flexible Scoring**: Supports variable maximum points and extra credit.
+4. **Flexible Scoring**: Supports variable maximum points and extra credit.
+5. **Batch Processing**: CLI interface for efficient processing of multiple submissions.
+6. **Brightspace Integration**: Tools for collecting and organizing submissions from Brightspace.
 
 ## How It Works
 
@@ -31,23 +33,41 @@ The user interface is built with Streamlit in `app.py`:
 - **Result Display**: Presents grading results in an organized, visually appealing manner.
 - **Interactive Elements**: Uses expandable sections and charts for detailed breakdowns.
 
-### 3. Grading Process
+### 3. CLI Interface (`cli.py`)
+
+The command-line interface provides efficient batch processing capabilities:
+
+- **Submission Collection**: `collect-btsp` command for organizing Brightspace downloads:
+  ```bash
+  python cli.py collect-btsp dir1 dir2 output_dir
+  ```
+
+- **File Standardization**: `rename` command for normalizing submission filenames:
+  ```bash
+  python cli.py rename submissions_dir
+  python cli.py rename submissions_dir --dry-run  # Preview changes
+  ```
+
+- **Batch Grading**: `grade` command for parallel processing of submissions:
+  ```bash
+  python cli.py grade submissions requirements.txt --threads 4 --max-points 150
+  ```
+
+### 4. Grading Process
 
 1. **Input Collection**: 
-   - User uploads a Java file containing the student's code.
-   - Assignment requirements are uploaded as a separate text file.
-   - Optional student comments can be added.
-   - Maximum points are set using a slider (default 100, range 10-200).
+   - Upload Java files (single or zip) containing student code
+   - Provide assignment requirements as a text file
+   - Optional student comments can be added
+   - Set maximum points (default 100, range 10-200)
 
 2. **AI Analysis**: The system sends the code, requirements, and grading criteria to the o1-preview model for analysis.
 
 3. **Result Processing**: AI's response is parsed and structured into various assessment categories.
 
 4. **Display**: 
-   - Results are presented in the web interface with various sections and visualizations.
-   - A gauge chart shows the final score out of the maximum points.
-   - A pie chart displays point deductions by category.
-   - Detailed breakdowns are provided for code analysis, requirements assessment, and improvement suggestions.
+   - Web UI: Interactive visualizations with gauge charts, pie charts, and detailed breakdowns
+   - CLI: CSV output with comprehensive grading results for batch processing
 
 ## Key Components
 
@@ -67,50 +87,9 @@ The user interface is built with Streamlit in `app.py`:
 2. **Customization Needs**: Grading criteria and prompts may need adjustment for different assignments or courses.
 3. **Feedback Review**: Regularly review AI-generated grades to ensure consistency and fairness.
 4. **Edge Cases**: While error handling is implemented, unexpected scenarios may still occur.
-5. **Performance**: Consider potential latency when grading multiple assignments, as each requires an API call.
-
-## Batch Grading and Automation
-
-While the Streamlit app provides an interactive interface, the grading functionality can be extended for batch processing:
-
-1. **Batch Grading Script**: 
-   - Create a Python script that iterates through a directory of Java files.
-   - Use the `grade_assignment` function from `grader.py` for each file.
-   - Store results in a structured format (e.g., JSON or CSV) for easy review.
-
-2. **Learning Management System Integration**:
-   - Utilize Selenium to automate browser interactions with your LMS.
-   - Navigate through student submissions, download Java files, and trigger the grading process.
-   - Upload grading results and feedback directly to the LMS.
-
-3. **Enhanced Runtime Simulation**:
-   - Implement a Java virtual environment within a sandbox.
-   - Actually execute the student's code instead of relying solely on AI reasoning.
-   - Capture runtime outputs, errors, and performance metrics for more accurate grading.
-
-Example batch grading script structure:
-
-```python
-import os
-from grader import grade_assignment
-
-def batch_grade(directory, requirements_file):
-    results = []
-    with open(requirements_file, 'r') as f:
-        guidelines = f.read()
-    
-    for filename in os.listdir(directory):
-        if filename.endswith('.java'):
-            with open(os.path.join(directory, filename), 'r') as f:
-                java_code = f.read()
-            result = grade_assignment(java_code, guidelines, "", 100, filename)
-            results.append({"filename": filename, "grade": result})
-    
-    return results
-
-# Usage
-results = batch_grade("path/to/submissions", "path/to/requirements.txt")
-```
+5. **Performance**: 
+   - Web UI: Consider latency for individual assignments due to API calls
+   - CLI: Utilize parallel processing for efficient batch grading
 
 ## Future Improvements
 
@@ -118,3 +97,4 @@ results = batch_grade("path/to/submissions", "path/to/requirements.txt")
 2. **Actual Code Execution**: Implement a secure environment to run and test student code directly.
 3. **Machine Learning Integration**: Train models on historical grading data to improve accuracy over time.
 4. **Plagiarism Detection**: Incorporate algorithms to detect code similarity across submissions.
+5. **LMS Integration**: Expand Brightspace integration to support other learning management systems.
