@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from grader import grade_assignment
 import zipfile
 import io
+import mimetypes
 
 # Set page config
 st.set_page_config(page_title="CS 101 Assignment Grader", page_icon="🎓", layout="wide")
@@ -45,6 +46,11 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+def is_text_file(filename):
+    """Check if a file is likely to be a text file based on its extension."""
+    text_extensions = {'.java', '.txt', '.csv', '.py', '.js', '.html', '.css', '.json', '.xml', '.md', '.log'}
+    return any(filename.lower().endswith(ext) for ext in text_extensions)
 
 def display_grading_result(result, max_points):
     # Main columns
@@ -176,16 +182,20 @@ def main():
         if uploaded_file.type == "application/zip":
             with zipfile.ZipFile(io.BytesIO(uploaded_file.read()), 'r') as zip_ref:
                 for file_info in zip_ref.infolist():
-                    if file_info.filename.endswith(".java"):
-                        with zip_ref.open(file_info) as file:
-                            files.append((file_info.filename, file.read().decode("utf-8")))
+                    if is_text_file(file_info.filename):
+                        try:
+                            with zip_ref.open(file_info) as file:
+                                content = file.read().decode("utf-8")
+                                files.append((file_info.filename, content))
+                        except UnicodeDecodeError:
+                            st.warning(f"Could not read {file_info.filename} as text file.")
         else:
             files.append((uploaded_file.name, uploaded_file.getvalue().decode("utf-8")))
 
         with st.expander("View Uploaded Code"):
             for file_name, content in files:
                 st.subheader(file_name)
-                st.code(content, language="java")
+                st.code(content, language="java" if file_name.endswith(".java") else "text")
 
         with st.expander("View Assignment Requirements"):
             st.text(assignment_guidelines)
