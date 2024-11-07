@@ -58,6 +58,7 @@ import json
 import csv
 import threading
 import zipfile
+import shutil
 from pathlib import Path
 from datetime import datetime
 from queue import Queue
@@ -648,7 +649,7 @@ def collect_btsp(
     typer.echo(f"\nCollection complete! {collected} files copied to {output_path}")
 
 
-def analyze_filename(filename: str) -> Tuple[str, str]:
+def analyze_filename(filename: str) -> Tuple[str | None, str | None]:
     """
     Use GPT-4o-mini to analyze a filename and extract the student's name.
     
@@ -656,7 +657,8 @@ def analyze_filename(filename: str) -> Tuple[str, str]:
         filename (str): Original filename
         
     Returns:
-        Tuple[str, str]: (first_name, last_name)
+        Tuple[str | None, str | None]: Extracted first and last name
+            None if the name could not be extracted
     """
     prompt = f"""
     Extract the student's first and last name from this filename: {filename}
@@ -666,6 +668,9 @@ def analyze_filename(filename: str) -> Tuple[str, str]:
     - May include assignment numbers (e.g., asg5, hw5)
     - May include additional descriptors (e.g., "part2", "PartB")
     - May be in various formats (e.g., "LastFirst" or "FirstLast")
+
+    If the student's name is clearly not in the filename, use "n/a" for both fields.
+    Fix the capitalization and spacing as needed, ex. "john" -> "John"
     
     Return only a JSON object in this format:
     {{"first_name": "string", "last_name": "string"}}
@@ -682,10 +687,14 @@ def analyze_filename(filename: str) -> Tuple[str, str]:
     if response.choices and response.choices[0].message:
         try:
             result = json.loads(response.choices[0].message.content)
-            return result["first_name"], result["last_name"]
+            return (
+                result["first_name"] if result["first_name"].lower().strip() != "n/a" else None, 
+                result["last_name"] if result["last_name"].lower().strip() != "n/a" else None
+            )
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error parsing name from filename {filename}: {e}")
             return None, None
+
     return None, None
 
 @app.command()
@@ -752,6 +761,8 @@ def rename(
             
             # Store rename operation
             rename_operations[file_path] = new_path
+        else:
+            logger.error(f"Error extracting student name from {file_path.name}")
     
     if not rename_operations:
         typer.echo("No files to rename.")
