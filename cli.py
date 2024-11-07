@@ -946,7 +946,7 @@ def grade(
         results.append(result_queue.get())
     
     # Sort results by student name for consistency
-    results.sort(key=lambda x: x.student_name)
+    results.sort(key=lambda x: x.last_name)
     
     # Write results
     typer.echo("Writing results...")
