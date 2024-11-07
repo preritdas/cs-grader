@@ -262,18 +262,35 @@ class SubmissionProcessor:
             List[SubmissionFile]: List of Java files from the zip
         """
         files = []
+        encodings = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']  # Common encodings to try
+        
         with self._file_lock:
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
                 for file_info in zip_ref.infolist():
                     if file_info.filename.endswith('.java'):
                         with zip_ref.open(file_info) as f:
-                            content = f.read().decode('utf-8')
-                            files.append(SubmissionFile(
-                                filename=file_info.filename,
-                                content=content
-                            ))
+                            content = f.read()
+                            # Try different encodings
+                            for encoding in encodings:
+                                try:
+                                    decoded_content = content.decode(encoding)
+                                    files.append(SubmissionFile(
+                                        filename=file_info.filename,
+                                        content=decoded_content
+                                    ))
+                                    break  # Successfully decoded, move to next file
+                                except UnicodeDecodeError:
+                                    continue  # Try next encoding
+                            else:  # No encoding worked
+                                logger.warning(f"Could not decode {file_info.filename} with any supported encoding")
+                                # Use latin1 as a fallback - it can decode any byte string
+                                decoded_content = content.decode('latin1')
+                                files.append(SubmissionFile(
+                                    filename=file_info.filename,
+                                    content=decoded_content
+                                ))
         return files
-    
+
     def find_submissions(self, directory: Path) -> List[Submission]:
         """
         Find all valid submissions in directory.
