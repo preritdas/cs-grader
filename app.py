@@ -4,6 +4,8 @@ import streamlit as st
 # Load the grader
 import plotly.graph_objects as go
 from grader import grade_assignment
+import zipfile
+import io
 
 # Set page config
 st.set_page_config(page_title="CS 101 Assignment Grader", page_icon="🎓", layout="wide")
@@ -157,8 +159,8 @@ def main():
     col1, col2 = st.columns(2)
 
     with col1:
-        # Java file upload
-        uploaded_file = st.file_uploader("Upload the student's Java file", type="java")
+        # Java file or zip file upload
+        uploaded_file = st.file_uploader("Upload the student's Java file or a .zip file", type=["java", "zip"])
 
     with col2:
         # Student comment
@@ -168,19 +170,29 @@ def main():
     max_points = st.slider("Maximum Points", min_value=10, max_value=200, value=100, step=5)
 
     if uploaded_file is not None and requirements_file is not None:
-        java_code = uploaded_file.getvalue().decode("utf-8")
         assignment_guidelines = requirements_file.getvalue().decode("utf-8")
-        file_name = uploaded_file.name
+        files = []
+
+        if uploaded_file.type == "application/zip":
+            with zipfile.ZipFile(io.BytesIO(uploaded_file.read()), 'r') as zip_ref:
+                for file_info in zip_ref.infolist():
+                    if file_info.filename.endswith(".java"):
+                        with zip_ref.open(file_info) as file:
+                            files.append((file_info.filename, file.read().decode("utf-8")))
+        else:
+            files.append((uploaded_file.name, uploaded_file.getvalue().decode("utf-8")))
 
         with st.expander("View Uploaded Code"):
-            st.code(java_code, language="java")
+            for file_name, content in files:
+                st.subheader(file_name)
+                st.code(content, language="java")
 
         with st.expander("View Assignment Requirements"):
             st.text(assignment_guidelines)
 
         if st.button("Grade Assignment"):
             with st.spinner("Grading in progress..."):
-                grade_result = grade_assignment(java_code, assignment_guidelines, student_comment, max_points, file_name)
+                grade_result = grade_assignment(files, assignment_guidelines, student_comment, max_points)
                 st.balloons()
                 display_grading_result(grade_result, max_points)
 

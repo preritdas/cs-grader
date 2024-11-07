@@ -36,26 +36,26 @@ def extract_json(text):
     else:
         raise ValueError("No valid JSON found in the response")
 
-def grade_assignment(java_code, guidelines, student_comment, max_points, file_name):
+def grade_assignment(files, guidelines, student_comment, max_points):
     """
-    Grade a Java assignment based on the provided code, guidelines, and student comment.
+    Grade a Java assignment based on the provided files, guidelines, and student comment.
     
     Args:
-    java_code (str): The student's Java code.
+    files (list): A list of tuples containing file names and their contents.
     guidelines (str): The assignment guidelines.
     student_comment (str): Any comments provided by the student.
     max_points (int): The maximum number of points for the assignment.
-    file_name (str): The name of the Java file.
     
     Returns:
     dict: A dictionary containing the grading results.
     """
+    files_str = "\n\n".join([f"File name: {file_name}\n{content}" for file_name, content in files])
     prompt = f"""
     Assignment Guidelines:
     {guidelines}
 
-    Student's Java Code (File name: {file_name}):
-    {java_code}
+    Student's Java Code:
+    {files_str}
 
     Student's Comment:
     {student_comment}
@@ -160,7 +160,7 @@ def grade_assignment(java_code, guidelines, student_comment, max_points, file_na
     """
 
     response = client.chat.completions.create(
-        model="o1-mini",
+        model="o1-preview",
         messages=[
             {"role": "user", "content": f"You are an experienced Java programming instructor and compiler expert tasked with grading student assignments.\n\n{prompt}"},
         ]
