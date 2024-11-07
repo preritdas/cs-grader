@@ -1,4 +1,4 @@
-"""Batch grader for CS assignments."""
+"""CLI for grading CS assignments."""
 import os
 import zipfile
 import csv
@@ -6,155 +6,245 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 import typer
-from typing import Optional
+from typing import Optional, List, Dict, Any, NamedTuple
+from dataclasses import dataclass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(help="Batch grade CS assignments with detailed feedback.")
+app = typer.Typer(help="Grade CS assignments with detailed feedback.")
 
-def extract_student_name(filename):
-    """Extract student's name from filename."""
-    base_name = Path(filename).stem
-    return base_name.replace('_', ' ')
+@dataclass
+class SubmissionFile:
+    """Represents a single file in a submission."""
+    filename: str
+    content: str
 
-def process_java_file(file_path):
-    """Process a single Java file."""
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    return [(Path(file_path).name, content)]
+@dataclass
+class Submission:
+    """Represents a complete submission with metadata."""
+    student_name: str
+    files: List[SubmissionFile]
+    original_path: Path
 
-def process_zip_file(file_path):
-    """Process a zip file containing Java files."""
-    files = []
-    with zipfile.ZipFile(file_path, 'r') as zip_ref:
-        for file_info in zip_ref.infolist():
-            if file_info.filename.endswith('.java'):
-                with zip_ref.open(file_info) as f:
-                    content = f.read().decode('utf-8')
-                    files.append((file_info.filename, content))
-    return files
+@dataclass
+class GradingResult:
+    """Represents the raw result of grading a submission."""
+    student_name: str
+    final_score: int
+    max_points: int
+    code_quality: str
+    requirements_assessment: List[Dict[str, Any]]
+    point_deductions: List[Dict[str, Any]]
+    extra_credit: Dict[str, Any]
+    overall_assessment: str
+    improvement_suggestions: List[str]
 
-def format_requirements(requirements):
-    """Format requirements assessment into a readable string."""
-    met_reqs = [req for req in requirements if req['met']]
-    unmet_reqs = [req for req in requirements if not req['met']]
-    
-    result = []
-    if met_reqs:
-        result.append("Requirements met:\n- " + "\n- ".join(
-            f"{req['requirement']}" for req in met_reqs
-        ))
-    if unmet_reqs:
-        result.append("Requirements not met:\n- " + "\n- ".join(
-            f"{req['requirement']}: {req['explanation']}" for req in unmet_reqs
-        ))
-    return "\n\n".join(result)
+@dataclass
+class FormattedResult:
+    """Represents a grading result formatted for output."""
+    student_name: str
+    final_score: str
+    code_quality: str
+    requirements_analysis: str
+    point_deductions: str
+    extra_credit: str
+    overall_assessment: str
+    areas_for_improvement: str
 
-def grade_submissions(submissions_dir: str, guidelines_path: str, max_points: int):
-    """Grade all submissions in the given directory."""
-    # Read guidelines
-    with open(guidelines_path, 'r', encoding='utf-8') as f:
-        guidelines = f.read()
+class SubmissionProcessor:
+    """Handles discovering and processing submission files."""
     
-    results = []
+    @staticmethod
+    def extract_student_name(filename: str) -> str:
+        """Extract student's name from filename."""
+        return Path(filename).stem.replace('_', ' ')
     
-    # Get list of valid files
-    valid_files = [f for f in os.listdir(submissions_dir) 
-                  if f.endswith(('.java', '.zip'))]
+    @staticmethod
+    def process_java_file(file_path: Path) -> List[SubmissionFile]:
+        """Process a single Java file."""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return [SubmissionFile(filename=file_path.name, content=content)]
     
-    if not valid_files:
-        logger.warning("No .java or .zip files found in the selected directory.")
-        return []
+    @staticmethod
+    def process_zip_file(file_path: Path) -> List[SubmissionFile]:
+        """Process a zip file containing Java files."""
+        files = []
+        with zipfile.ZipFile(file_path, 'r') as zip_ref:
+            for file_info in zip_ref.infolist():
+                if file_info.filename.endswith('.java'):
+                    with zip_ref.open(file_info) as f:
+                        content = f.read().decode('utf-8')
+                        files.append(SubmissionFile(
+                            filename=file_info.filename,
+                            content=content
+                        ))
+        return files
     
-    # Process all files with tqdm progress bar
-    for filename in tqdm(valid_files, desc="Grading submissions"):
-        file_path = os.path.join(submissions_dir, filename)
-        student_name = extract_student_name(filename)
-        logger.info(f"Processing submission for {student_name}")
+    @classmethod
+    def find_submissions(cls, directory: Path) -> List[Submission]:
+        """Find all valid submissions in directory."""
+        submissions = []
+        for file_path in directory.glob('*'):
+            if not (file_path.suffix in ['.java', '.zip']):
+                continue
+                
+            student_name = cls.extract_student_name(file_path.name)
+            
+            try:
+                if file_path.suffix == '.zip':
+                    files = cls.process_zip_file(file_path)
+                else:
+                    files = cls.process_java_file(file_path)
+                
+                submissions.append(Submission(
+                    student_name=student_name,
+                    files=files,
+                    original_path=file_path
+                ))
+            except Exception as e:
+                logger.error(f"Error processing {file_path}: {str(e)}")
         
+        return submissions
+
+class ResultFormatter:
+    """Handles formatting grading results for output."""
+    
+    @staticmethod
+    def format_requirements(requirements: List[Dict[str, Any]]) -> str:
+        """Format requirements assessment into a readable string."""
+        met_reqs = [req for req in requirements if req['met']]
+        unmet_reqs = [req for req in requirements if not req['met']]
+        
+        result = []
+        if met_reqs:
+            result.append("Requirements met:\n- " + "\n- ".join(
+                f"{req['requirement']}" for req in met_reqs
+            ))
+        if unmet_reqs:
+            result.append("Requirements not met:\n- " + "\n- ".join(
+                f"{req['requirement']}: {req['explanation']}" for req in unmet_reqs
+            ))
+        return "\n\n".join(result)
+    
+    @classmethod
+    def format_result(cls, result: GradingResult) -> FormattedResult:
+        """Format a grading result for output."""
+        # Format point deductions
+        deductions_text = "\n".join(
+            f"- {d['reason']} (-{d['points']} points)" 
+            for d in result.point_deductions
+        ) if result.point_deductions else "No points deducted"
+        
+        # Format extra credit
+        extra_credit_text = (
+            f"+{result.extra_credit['points']} points: {result.extra_credit['reason']}"
+            if result.extra_credit['awarded']
+            else "No extra credit awarded"
+        )
+        
+        return FormattedResult(
+            student_name=result.student_name,
+            final_score=f"{result.final_score}/{result.max_points}",
+            code_quality=result.code_quality,
+            requirements_analysis=cls.format_requirements(result.requirements_assessment),
+            point_deductions=deductions_text,
+            extra_credit=extra_credit_text,
+            overall_assessment=result.overall_assessment,
+            areas_for_improvement="\n- " + "\n- ".join(result.improvement_suggestions)
+        )
+
+class ResultWriter:
+    """Handles writing formatted results to CSV."""
+    
+    @staticmethod
+    def write_results(results: List[FormattedResult], output_path: Path) -> None:
+        """Write formatted results to CSV file."""
+        if not results:
+            logger.warning("No results to write to CSV")
+            return
+            
+        fieldnames = [
+            'Student Name',
+            'Final Score',
+            'Code Quality Assessment',
+            'Requirements Analysis',
+            'Point Deductions',
+            'Extra Credit',
+            'Overall Assessment',
+            'Areas for Improvement'
+        ]
+        
+        rows = [
+            {
+                'Student Name': r.student_name,
+                'Final Score': r.final_score,
+                'Code Quality Assessment': r.code_quality,
+                'Requirements Analysis': r.requirements_analysis,
+                'Point Deductions': r.point_deductions,
+                'Extra Credit': r.extra_credit,
+                'Overall Assessment': r.overall_assessment,
+                'Areas for Improvement': r.areas_for_improvement
+            }
+            for r in results
+        ]
+        
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        
+        logger.info(f"Results written to {output_path}")
+
+class Grader:
+    """Coordinates the grading process."""
+    
+    def __init__(self, guidelines: str, max_points: int):
+        self.guidelines = guidelines
+        self.max_points = max_points
+    
+    def grade_submission(self, submission: Submission) -> GradingResult:
+        """Grade a single submission."""
         try:
-            # Process file based on type
-            if filename.endswith('.zip'):
-                files = process_zip_file(file_path)
-            else:
-                files = process_java_file(file_path)
+            from grader import grade_assignment
+            
+            # Convert submission files to format expected by grader
+            files = [(f.filename, f.content) for f in submission.files]
             
             # Grade the submission
-            from grader import grade_assignment
-            grade_result = grade_assignment(
+            result = grade_assignment(
                 files=files,
-                guidelines=guidelines,
-                student_comment="",  # No student comments in batch processing
-                max_points=max_points
+                guidelines=self.guidelines,
+                student_comment="",
+                max_points=self.max_points
             )
             
-            # Format point deductions into readable text
-            deductions_text = "\n".join(
-                f"- {d['reason']} (-{d['points']} points)" 
-                for d in grade_result['point_deductions']
+            return GradingResult(
+                student_name=submission.student_name,
+                final_score=result['final_score'],
+                max_points=self.max_points,
+                code_quality=result['code_quality'],
+                requirements_assessment=result['requirements_assessment'],
+                point_deductions=result['point_deductions'],
+                extra_credit=result['extra_credit'],
+                overall_assessment=result['overall_assessment'],
+                improvement_suggestions=result['improvement_suggestions']
             )
-            
-            # Format extra credit explanation
-            extra_credit_text = (
-                f"+{grade_result['extra_credit']['points']} points: {grade_result['extra_credit']['reason']}"
-                if grade_result['extra_credit']['awarded']
-                else "No extra credit awarded"
-            )
-            
-            # Add student info to result with detailed feedback
-            result = {
-                'Student Name': student_name,
-                'Final Score': f"{grade_result['final_score']}/{max_points}",
-                'Code Quality Assessment': grade_result['code_quality'],
-                'Requirements Analysis': format_requirements(grade_result['requirements_assessment']),
-                'Point Deductions': deductions_text if grade_result['point_deductions'] else "No points deducted",
-                'Extra Credit': extra_credit_text,
-                'Overall Assessment': grade_result['overall_assessment'],
-                'Areas for Improvement': "\n- " + "\n- ".join(grade_result['improvement_suggestions'])
-            }
-            
-            results.append(result)
-            logger.info(f"Completed grading for {student_name}")
             
         except Exception as e:
-            logger.error(f"Error processing submission for {student_name}: {str(e)}")
-            results.append({
-                'Student Name': student_name,
-                'Final Score': f"0/{max_points}",
-                'Code Quality Assessment': "Error during grading",
-                'Requirements Analysis': "Error during grading",
-                'Point Deductions': "Error during grading",
-                'Extra Credit': "N/A",
-                'Overall Assessment': "Failed to grade submission",
-                'Areas for Improvement': "Please resubmit or contact instructor"
-            })
-    
-    return results
-
-def write_results_to_csv(results, output_path):
-    """Write grading results to CSV file."""
-    if not results:
-        logger.warning("No results to write to CSV")
-        return
-        
-    fieldnames = [
-        'Student Name',
-        'Final Score',
-        'Code Quality Assessment',
-        'Requirements Analysis',
-        'Point Deductions',
-        'Extra Credit',
-        'Overall Assessment',
-        'Areas for Improvement'
-    ]
-    
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(results)
-    
-    logger.info(f"Results written to {output_path}")
+            logger.error(f"Error grading submission for {submission.student_name}: {str(e)}")
+            return GradingResult(
+                student_name=submission.student_name,
+                final_score=0,
+                max_points=self.max_points,
+                code_quality="Error during grading",
+                requirements_assessment=[],
+                point_deductions=[],
+                extra_credit={'awarded': False, 'points': 0, 'reason': ''},
+                overall_assessment="Failed to grade submission",
+                improvement_suggestions=["Please resubmit or contact instructor"]
+            )
 
 @app.command()
 def grade(
@@ -175,11 +265,14 @@ def grade(
     - Specific point deductions with explanations
     - Areas for improvement
     """
-    if not os.path.isdir(submissions_dir):
+    # Validate inputs
+    submissions_path = Path(submissions_dir)
+    if not submissions_path.is_dir():
         typer.echo(f"Error: {submissions_dir} is not a valid directory")
         raise typer.Exit(1)
     
-    if not os.path.isfile(guidelines_path):
+    guidelines_path = Path(guidelines_path)
+    if not guidelines_path.is_file():
         typer.echo(f"Error: {guidelines_path} is not a valid file")
         raise typer.Exit(1)
     
@@ -188,18 +281,35 @@ def grade(
         raise typer.Exit(1)
     
     # Set default output path if not provided
-    if output is None:
-        output = os.path.join(os.path.dirname(submissions_dir), 'grading_results.csv')
+    output_path = Path(output) if output else submissions_path.parent / 'grading_results.csv'
     
-    typer.echo(f"Starting grading process...")
-    results = grade_submissions(submissions_dir, guidelines_path, max_points)
+    # Read guidelines
+    with open(guidelines_path, 'r', encoding='utf-8') as f:
+        guidelines = f.read()
     
-    if results:
-        write_results_to_csv(results, output)
-        typer.echo(f"Grading completed! Results saved to: {output}")
-    else:
-        typer.echo("No submissions were processed.")
+    # Find all submissions
+    typer.echo("Finding submissions...")
+    submissions = SubmissionProcessor.find_submissions(submissions_path)
+    
+    if not submissions:
+        typer.echo("No valid submissions found.")
         raise typer.Exit(1)
+    
+    # Create grader
+    grader = Grader(guidelines, max_points)
+    
+    # Grade submissions
+    typer.echo("Grading submissions...")
+    results = []
+    for submission in tqdm(submissions, desc="Grading"):
+        result = grader.grade_submission(submission)
+        formatted_result = ResultFormatter.format_result(result)
+        results.append(formatted_result)
+    
+    # Write results
+    typer.echo("Writing results...")
+    ResultWriter.write_results(results, output_path)
+    typer.echo(f"Grading completed! Results saved to: {output_path}")
 
 if __name__ == "__main__":
     app()
