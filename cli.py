@@ -1,4 +1,55 @@
-"""CLI for grading CS assignments."""
+"""
+CS Assignment Grading CLI.
+
+This CLI tool provides functionality for grading CS assignments, particularly designed
+for handling submissions from Brightspace. It supports both batch processing of submissions
+and parallel grading with detailed feedback.
+
+Main Features:
+-------------
+1. Collect submissions from Brightspace downloads
+   - Recursively process multiple directories
+   - Handle duplicate files
+   - Preserve original filenames
+
+2. Grade submissions with parallel processing
+   - Support for both .zip and .java files
+   - Multi-threaded grading
+   - Detailed feedback in CSV format
+   - Thread-safe operations
+
+Usage Examples:
+--------------
+1. Collect submissions from Brightspace:
+   ```bash
+   # Collect from two Brightspace download directories into 'students' directory
+   python cli.py collect dir1 dir2 students
+   ```
+
+2. Grade submissions:
+   ```bash
+   # Grade with default settings (single thread, 100 points)
+   python cli.py grade students requirements.txt
+
+   # Grade with 4 threads and 150 maximum points
+   python cli.py grade students requirements.txt --threads 4 --max-points 150
+   ```
+
+Output Format:
+-------------
+The grading process generates a CSV file with the following columns:
+1. Student Name
+2. Final Score
+3. Extra Credit
+4. Code Quality Assessment
+5. Requirements Analysis
+6. Point Deductions
+7. Overall Assessment
+8. Areas for Improvement
+
+For more information on specific commands, use:
+python cli.py [command] --help
+"""
 import zipfile
 import csv
 from pathlib import Path
@@ -13,6 +64,8 @@ from queue import Queue
 import sys
 import shutil
 
+
+# Configure logging with thread information
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(threadName)s - %(message)s',
@@ -22,24 +75,56 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(help="Grade CS assignments with detailed feedback.")
+app = typer.Typer(
+    help="CS Assignment Grading CLI - Process and grade programming assignments with detailed feedback.",
+    no_args_is_help=True
+)
+
 
 @dataclass
 class SubmissionFile:
-    """Represents a single file in a submission."""
+    """
+    Represents a single file in a submission.
+    
+    Attributes:
+        filename (str): Name of the submitted file
+        content (str): Content of the file as text
+    """
     filename: str
     content: str
 
+
 @dataclass
 class Submission:
-    """Represents a complete submission with metadata."""
+    """
+    Represents a complete submission with metadata.
+    
+    Attributes:
+        student_name (str): Extracted name of the student
+        files (List[SubmissionFile]): List of submitted files
+        original_path (Path): Original location of the submission
+    """
     student_name: str
     files: List[SubmissionFile]
     original_path: Path
 
+
 @dataclass
 class GradingResult:
-    """Represents the raw result of grading a submission."""
+    """
+    Represents the raw result of grading a submission.
+    
+    Attributes:
+        student_name (str): Name of the student
+        final_score (int): Final numerical score
+        max_points (int): Maximum possible points
+        code_quality (str): Assessment of code quality
+        requirements_assessment (List[Dict]): List of requirement evaluations
+        point_deductions (List[Dict]): List of point deductions with reasons
+        extra_credit (Dict): Extra credit information
+        overall_assessment (str): Overall evaluation
+        improvement_suggestions (List[str]): Suggested improvements
+    """
     student_name: str
     final_score: int
     max_points: int
@@ -50,12 +135,28 @@ class GradingResult:
     overall_assessment: str
     improvement_suggestions: List[str]
 
+
 @dataclass
 class FormattedResult:
-    """Represents a grading result formatted for output."""
+    """
+    Represents a grading result formatted for output.
+    
+    This format is used for CSV output and includes all feedback
+    in a human-readable format.
+    
+    Attributes:
+        student_name (str): Name of the student
+        final_score (str): Score as "points/total"
+        extra_credit (str): Extra credit with explanation
+        code_quality (str): Code quality assessment
+        requirements_analysis (str): Detailed requirements feedback
+        point_deductions (str): Explanation of deductions
+        overall_assessment (str): Overall evaluation
+        areas_for_improvement (str): Improvement suggestions
+    """
     student_name: str
     final_score: str
-    extra_credit: str  # Moved up in the order
+    extra_credit: str
     code_quality: str
     requirements_analysis: str
     point_deductions: str
@@ -63,37 +164,81 @@ class FormattedResult:
     areas_for_improvement: str
 
 class ThreadSafeWriter:
-    """Thread-safe file writer using a lock."""
+    """
+    Thread-safe file writer using a lock.
+    
+    This class ensures that file writing operations are atomic
+    and thread-safe, preventing race conditions when multiple
+    threads need to write to the same file.
+    """
     
     def __init__(self):
         self._lock = threading.Lock()
     
     def write_safely(self, file_path: Path, mode: str, write_func):
-        """Execute a write function with thread safety."""
+        """
+        Execute a write function with thread safety.
+        
+        Args:
+            file_path (Path): Path to the file to write
+            mode (str): File open mode ('w', 'a', etc.)
+            write_func (callable): Function that performs the writing
+        """
         with self._lock:
             with open(file_path, mode) as f:
                 return write_func(f)
 
+
 class SubmissionProcessor:
-    """Handles discovering and processing submission files."""
+    """
+    Handles discovering and processing submission files.
+    
+    This class is responsible for finding submissions in a directory,
+    extracting student information, and processing both zip and Java files.
+    All file operations are thread-safe.
+    """
     
     def __init__(self):
         self._file_lock = threading.Lock()
     
     @staticmethod
     def extract_student_name(filename: str) -> str:
-        """Extract student's name from filename."""
+        """
+        Extract student's name from filename.
+        
+        Args:
+            filename (str): Name of the submission file
+            
+        Returns:
+            str: Student's name in "First Last" format
+        """
         return Path(filename).stem.replace('_', ' ')
     
     def process_java_file(self, file_path: Path) -> List[SubmissionFile]:
-        """Process a single Java file with thread safety."""
+        """
+        Process a single Java file with thread safety.
+        
+        Args:
+            file_path (Path): Path to the Java file
+            
+        Returns:
+            List[SubmissionFile]: List containing the processed Java file
+        """
         with self._file_lock:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             return [SubmissionFile(filename=file_path.name, content=content)]
     
     def process_zip_file(self, file_path: Path) -> List[SubmissionFile]:
-        """Process a zip file containing Java files with thread safety."""
+        """
+        Process a zip file containing Java files with thread safety.
+        
+        Args:
+            file_path (Path): Path to the zip file
+            
+        Returns:
+            List[SubmissionFile]: List of Java files from the zip
+        """
         files = []
         with self._file_lock:
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
@@ -108,7 +253,15 @@ class SubmissionProcessor:
         return files
     
     def find_submissions(self, directory: Path) -> List[Submission]:
-        """Find all valid submissions in directory."""
+        """
+        Find all valid submissions in directory.
+        
+        Args:
+            directory (Path): Directory to search for submissions
+            
+        Returns:
+            List[Submission]: List of found submissions
+        """
         submissions = []
         for file_path in directory.glob('*'):
             if not (file_path.suffix in ['.java', '.zip']):
@@ -132,12 +285,26 @@ class SubmissionProcessor:
         
         return submissions
 
+
 class ResultFormatter:
-    """Handles formatting grading results for output."""
+    """
+    Handles formatting grading results for output.
+    
+    This class converts raw grading results into a human-readable
+    format suitable for CSV output.
+    """
     
     @staticmethod
     def format_requirements(requirements: List[Dict[str, Any]]) -> str:
-        """Format requirements assessment into a readable string."""
+        """
+        Format requirements assessment into a readable string.
+        
+        Args:
+            requirements (List[Dict]): List of requirement assessments
+            
+        Returns:
+            str: Formatted string showing met and unmet requirements
+        """
         met_reqs = [req for req in requirements if req['met']]
         unmet_reqs = [req for req in requirements if not req['met']]
         
@@ -154,7 +321,15 @@ class ResultFormatter:
     
     @classmethod
     def format_result(cls, result: GradingResult) -> FormattedResult:
-        """Format a grading result for output."""
+        """
+        Format a grading result for output.
+        
+        Args:
+            result (GradingResult): Raw grading result
+            
+        Returns:
+            FormattedResult: Formatted result ready for output
+        """
         # Format point deductions
         deductions_text = "\n".join(
             f"- {d['reason']} (-{d['points']} points)" 
@@ -171,7 +346,7 @@ class ResultFormatter:
         return FormattedResult(
             student_name=result.student_name,
             final_score=f"{result.final_score}/{result.max_points}",
-            extra_credit=extra_credit_text,  # Moved up in the order
+            extra_credit=extra_credit_text,
             code_quality=result.code_quality,
             requirements_analysis=cls.format_requirements(result.requirements_assessment),
             point_deductions=deductions_text,
@@ -179,14 +354,26 @@ class ResultFormatter:
             areas_for_improvement="\n- " + "\n- ".join(result.improvement_suggestions)
         )
 
+
 class ResultWriter:
-    """Handles writing formatted results to CSV."""
+    """
+    Handles writing formatted results to CSV.
+    
+    This class manages the thread-safe writing of grading results
+    to a CSV file with proper formatting and headers.
+    """
     
     def __init__(self):
         self._writer = ThreadSafeWriter()
     
     def write_results(self, results: List[FormattedResult], output_path: Path) -> None:
-        """Write formatted results to CSV file with thread safety."""
+        """
+        Write formatted results to CSV file with thread safety.
+        
+        Args:
+            results (List[FormattedResult]): List of results to write
+            output_path (Path): Path to output CSV file
+        """
         if not results:
             logger.warning("No results to write to CSV")
             return
@@ -194,7 +381,7 @@ class ResultWriter:
         fieldnames = [
             'Student Name',
             'Final Score',
-            'Extra Credit',  # Moved up in the order
+            'Extra Credit',
             'Code Quality Assessment',
             'Requirements Analysis',
             'Point Deductions',
@@ -206,7 +393,7 @@ class ResultWriter:
             {
                 'Student Name': r.student_name,
                 'Final Score': r.final_score,
-                'Extra Credit': r.extra_credit,  # Moved up in the order
+                'Extra Credit': r.extra_credit,
                 'Code Quality Assessment': r.code_quality,
                 'Requirements Analysis': r.requirements_analysis,
                 'Point Deductions': r.point_deductions,
@@ -224,15 +411,37 @@ class ResultWriter:
         self._writer.write_safely(output_path, 'w', write_csv)
         logger.info(f"Results written to {output_path}")
 
+
 class Grader:
-    """Coordinates the grading process."""
+    """
+    Coordinates the grading process.
+    
+    This class handles the core grading logic, including interaction
+    with the grading module and error handling.
+    """
     
     def __init__(self, guidelines: str, max_points: int):
+        """
+        Initialize grader with guidelines and maximum points.
+        
+        Args:
+            guidelines (str): Assignment requirements/guidelines
+            max_points (int): Maximum possible points
+        """
         self.guidelines = guidelines
         self.max_points = max_points
     
+
     def grade_submission(self, submission: Submission) -> GradingResult:
-        """Grade a single submission."""
+        """
+        Grade a single submission.
+        
+        Args:
+            submission (Submission): Submission to grade
+            
+        Returns:
+            GradingResult: Grading result with feedback
+        """
         try:
             from grader import grade_assignment
             
@@ -273,21 +482,37 @@ class Grader:
                 improvement_suggestions=["Please resubmit or contact instructor"]
             )
 
+
 @app.command()
 def collect(
-    brightspace_dirs: List[str] = typer.Argument(..., help="List of Brightspace download directories"),
-    output_dir: str = typer.Argument(..., help="Directory to collect all submissions"),
+    brightspace_dirs: List[str] = typer.Argument(
+        ...,
+        help="List of Brightspace download directories to process",
+        show_default=False
+    ),
+    output_dir: str = typer.Argument(
+        ...,
+        help="Directory where submissions will be collected",
+        show_default=False
+    ),
 ):
     """
-    Collect submissions from Brightspace download directories into a single directory.
+    Collect submissions from Brightspace download directories.
     
-    This command will:
-    1. Scan all input directories recursively
-    2. Find all files (preserving original names)
-    3. Copy them to the output directory
+    This command processes Brightspace download directories and copies all submission
+    files to a single output directory. It handles duplicate files by adding numeric
+    suffixes and preserves original filenames.
     
     Example:
-    python cli.py collect 1 2 students
+        # Collect submissions from two Brightspace directories
+        python cli.py collect dir1 dir2 output_dir
+    
+    The command will:
+    1. Recursively scan all input directories
+    2. Find all files (except index.html)
+    3. Copy files to the output directory
+    4. Handle duplicates by adding numeric suffixes
+    5. Show progress with a progress bar
     """
     # Convert paths to Path objects
     brightspace_paths = [Path(d) for d in brightspace_dirs]
@@ -340,25 +565,58 @@ def collect(
     collected = len(list(output_path.glob('*')))
     typer.echo(f"\nCollection complete! {collected} files copied to {output_path}")
 
+
 @app.command()
 def grade(
-    submissions_dir: str = typer.Argument(..., help="Directory containing student submissions (.java or .zip files)"),
-    guidelines_path: str = typer.Argument(..., help="Path to the assignment requirements file"),
-    max_points: Optional[int] = typer.Option(100, help="Maximum points possible for the assignment"),
-    threads: Optional[int] = typer.Option(1, help="Number of threads to use for parallel grading"),
+    submissions_dir: str = typer.Argument(
+        ...,
+        help="Directory containing student submissions (.java or .zip files)",
+        show_default=False
+    ),
+    guidelines_path: str = typer.Argument(
+        ...,
+        help="Path to the assignment requirements file",
+        show_default=False
+    ),
+    max_points: Optional[int] = typer.Option(
+        100,
+        help="Maximum points possible for the assignment",
+        show_default=True
+    ),
+    threads: Optional[int] = typer.Option(
+        1,
+        help="Number of threads to use for parallel grading",
+        show_default=True
+    ),
     output: Optional[str] = typer.Option(
         None,
-        help="Output CSV file path. If not provided, will save as grading_results.csv in the submissions directory"
+        help="Output CSV file path. If not provided, saves as grading_results.csv in the submissions directory",
+        show_default=False
     )
 ):
     """
-    Grade all Java assignments in a directory and generate a detailed feedback CSV.
+    Grade all Java assignments in a directory.
     
-    The CSV will include qualitative feedback about:
-    - Requirements met and unmet
-    - Code quality assessment
-    - Specific point deductions with explanations
-    - Areas for improvement
+    This command processes Java submissions (either .java files or .zip files containing
+    Java files) and generates a detailed feedback CSV. It supports parallel processing
+    for faster grading of large submission sets.
+    
+    Example:
+        # Grade submissions with 4 threads and 150 maximum points
+        python cli.py grade submissions requirements.txt --threads 4 --max-points 150
+    
+    The command will:
+    1. Find all Java submissions in the directory
+    2. Grade each submission using the provided guidelines
+    3. Generate detailed feedback including:
+       - Requirements met/unmet
+       - Code quality assessment
+       - Point deductions with explanations
+       - Extra credit
+       - Areas for improvement
+    4. Save results to a CSV file
+    
+    The grading process is thread-safe and shows real-time progress.
     """
     # Validate inputs
     submissions_path = Path(submissions_dir)
@@ -447,6 +705,7 @@ def grade(
     typer.echo("Writing results...")
     writer.write_results(results, output_path)
     typer.echo(f"Grading completed! Results saved to: {output_path}")
+
 
 if __name__ == "__main__":
     app()
