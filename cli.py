@@ -63,6 +63,8 @@ import threading
 from queue import Queue
 import sys
 import shutil
+import re
+from datetime import datetime
 
 
 # Configure logging with thread information
@@ -101,7 +103,7 @@ class Submission:
     
     Attributes:
         student_name (str): Extracted name of the student
-        files (List[SubmissionFile]): List of submitted files
+        files: List[SubmissionFile]: List of submitted files
         original_path (Path): Original location of the submission
     """
     student_name: str
@@ -162,6 +164,7 @@ class FormattedResult:
     point_deductions: str
     overall_assessment: str
     areas_for_improvement: str
+
 
 class ThreadSafeWriter:
     """
@@ -499,9 +502,9 @@ def collect_btsp(
     """
     Collect submissions from Brightspace download directories.
     
-    This command processes Brightspace download directories and copies all submission
-    files to a single output directory. It handles duplicate files by adding numeric
-    suffixes and preserves original filenames.
+    This command processes Brightspace download directories and copies submission
+    files to a single output directory. It enforces one submission per student
+    (taking the latest) and one file per submission (prioritizing .zip over .java).
     
     Example:
         # Collect submissions from two Brightspace directories
@@ -509,9 +512,12 @@ def collect_btsp(
     
     The command will:
     1. Recursively scan all input directories
-    2. Find all files (except index.html)
-    3. Copy files to the output directory
-    4. Handle duplicates by adding numeric suffixes
+    2. For each student, identify their latest submission
+    3. From that submission, take:
+       - First .zip file if present
+       - Otherwise first .java file
+       - Error if neither exists but other files are present
+    4. Copy selected files to the output directory
     5. Show progress with a progress bar
     """
     # Convert paths to Path objects
@@ -527,39 +533,72 @@ def collect_btsp(
     # Create output directory if it doesn't exist
     output_path.mkdir(exist_ok=True)
     
-    # Track files for progress bar
-    all_files = []
-    for dir_path in brightspace_paths:
-        # Walk through directory
-        for path in dir_path.rglob('*'):
-            if path.is_file() and path.name != 'index.html':  # Skip index.html
-                all_files.append(path)
+    # Dictionary to track latest submission per student
+    student_submissions: Dict[str, Tuple[datetime, Path]] = {}
     
-    if not all_files:
-        typer.echo("No files found in input directories.")
+    # Regular expression to extract student name and date from directory name
+    pattern = re.compile(r'(\d+)-\d+ - (.+) - (.+)')
+    
+    # Find all submission directories
+    for dir_path in brightspace_paths:
+        for path in dir_path.iterdir():
+            if not path.is_dir() or path.name == 'index.html':
+                continue
+                
+            match = pattern.match(path.name)
+            if not match:
+                continue
+                
+            # Extract student name and submission date
+            student_name = match.group(2).strip()
+            try:
+                date_str = match.group(3)
+                submission_date = datetime.strptime(date_str, '%b %d, %Y %I%M %p')
+            except ValueError:
+                logger.error(f"Could not parse date from directory: {path}")
+                continue
+            
+            # Update if this is the latest submission for this student
+            if student_name not in student_submissions or submission_date > student_submissions[student_name][0]:
+                student_submissions[student_name] = (submission_date, path)
+    
+    if not student_submissions:
+        typer.echo("No valid submissions found.")
         raise typer.Exit(1)
     
-    # Copy files with progress bar
-    with tqdm(total=len(all_files), desc="Collecting submissions") as progress:
-        for file_path in all_files:
+    # Process submissions with progress bar
+    with tqdm(total=len(student_submissions), desc="Collecting submissions") as progress:
+        for student_name, (_, submission_dir) in student_submissions.items():
             try:
-                # Generate unique name if file already exists
-                dest_path = output_path / file_path.name
-                if dest_path.exists():
-                    # Add numeric suffix if file exists
-                    base = dest_path.stem
-                    suffix = dest_path.suffix
-                    counter = 1
-                    while dest_path.exists():
-                        dest_path = output_path / f"{base}_{counter}{suffix}"
-                        counter += 1
+                # Look for .zip files first
+                zip_files = list(submission_dir.glob('*.zip'))
+                java_files = list(submission_dir.glob('*.java'))
+                other_files = list(submission_dir.glob('*'))
                 
-                # Copy file
-                shutil.copy2(file_path, dest_path)
-                progress.update(1)
+                # Determine which file to copy
+                if zip_files:
+                    file_to_copy = zip_files[0]  # Take first .zip file
+                elif java_files:
+                    file_to_copy = java_files[0]  # Take first .java file
+                elif other_files:
+                    # If there are files but none are .zip or .java, log error
+                    logger.error(f"No valid submission file found for {student_name}. "
+                               f"Directory contains: {[f.name for f in other_files]}")
+                    progress.update(1)
+                    continue
+                else:
+                    logger.error(f"Empty submission directory for {student_name}")
+                    progress.update(1)
+                    continue
+                
+                # Copy file to output directory
+                dest_path = output_path / file_to_copy.name
+                shutil.copy2(file_to_copy, dest_path)
+                
             except Exception as e:
-                logger.error(f"Error copying {file_path}: {str(e)}")
-                progress.update(1)
+                logger.error(f"Error processing submission for {student_name}: {str(e)}")
+            
+            progress.update(1)
     
     # Count collected files
     collected = len(list(output_path.glob('*')))
