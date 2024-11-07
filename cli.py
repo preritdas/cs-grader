@@ -484,7 +484,7 @@ class Grader:
 
 
 @app.command()
-def collect(
+def collect_btsp(
     brightspace_dirs: List[str] = typer.Argument(
         ...,
         help="List of Brightspace download directories to process",
