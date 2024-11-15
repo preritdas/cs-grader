@@ -74,7 +74,7 @@ def grade_assignment(files, guidelines, student_comment, max_points):
        - Assuming syntax is correct, check if the code would compile successfully.
        - Identify any potential compilation errors, such as undefined variables or type mismatches.
        - Consider partial credit for code that's close to compiling but has minor issues.
-       - Ensure the class name matches the file name (excluding the .java extension) for proper compilation.
+       - Ignore errors that the file name doesn't match the class name as files have been renamed. 
 
     3. Logical Error Detection:
        - Analyze the code for logical errors or flaws in the implementation.
